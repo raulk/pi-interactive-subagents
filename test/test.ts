@@ -16,7 +16,12 @@ import {
   mergeNewEntries,
 } from "../pi-extension/subagents/session.ts";
 
-import { shellEscape, isCmuxAvailable, isWezTermAvailable } from "../pi-extension/subagents/cmux.ts";
+import {
+  shellEscape,
+  isCmuxAvailable,
+  isWezTermAvailable,
+  isGhosttyAvailable,
+} from "../pi-extension/subagents/cmux.ts";
 import {
   shouldMarkUserTookOver,
   shouldAutoExitOnAgentEnd,
@@ -370,6 +375,38 @@ describe("subagents widget rendering", () => {
   });
 });
 
+describe("subagent command building", () => {
+  it("writes a default exit sidecar for posix shells after preserving the pi exit code", () => {
+    const testApi = (subagentsModule as any).__test__;
+    const command = testApi.buildCompletionCommand(
+      "pi --session '/tmp/session.jsonl'",
+      "/tmp/session.jsonl",
+      "rm -f '/tmp/message.md'",
+      "posix",
+    );
+
+    assert.ok(command.includes("pi --session '/tmp/session.jsonl'; pi_subagent_status=$?; rm -f '/tmp/message.md';"));
+    assert.ok(command.includes("if [ ! -f '/tmp/session.jsonl.exit' ]; then"));
+    assert.ok(command.includes(`printf '{"type":"done","exitCode":%s}\\n' "$pi_subagent_status" > '/tmp/session.jsonl.exit'`));
+    assert.ok(command.endsWith(`echo '__SUBAGENT_DONE_'$pi_subagent_status'__'`));
+  });
+
+  it("writes a default exit sidecar for fish shells after preserving the pi exit code", () => {
+    const testApi = (subagentsModule as any).__test__;
+    const command = testApi.buildCompletionCommand(
+      "pi --session '/tmp/session.jsonl'",
+      "/tmp/session.jsonl",
+      undefined,
+      "fish",
+    );
+
+    assert.ok(command.includes("pi --session '/tmp/session.jsonl'; set -l pi_subagent_status $status;"));
+    assert.ok(command.includes("if not test -f '/tmp/session.jsonl.exit';"));
+    assert.ok(command.includes(`printf '{"type":"done","exitCode":%s}\\n' "$pi_subagent_status" > '/tmp/session.jsonl.exit'`));
+    assert.ok(command.endsWith(`echo '__SUBAGENT_DONE_'$pi_subagent_status'__'`));
+  });
+});
+
 describe("cmux.ts", () => {
   describe("shellEscape", () => {
     it("wraps in single quotes", () => {
@@ -405,6 +442,13 @@ describe("cmux.ts", () => {
   describe("isWezTermAvailable", () => {
     it("returns boolean based on WEZTERM_UNIX_SOCKET", () => {
       const result = isWezTermAvailable();
+      assert.equal(typeof result, "boolean");
+    });
+  });
+
+  describe("isGhosttyAvailable", () => {
+    it("returns boolean based on Ghostty AppleScript availability", () => {
+      const result = isGhosttyAvailable();
       assert.equal(typeof result, "boolean");
     });
   });

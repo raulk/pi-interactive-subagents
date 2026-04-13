@@ -21,7 +21,7 @@ import {
   pollForExit,
   closeSurface,
   shellEscape,
-  exitStatusVar,
+  isFishShell,
   renameCurrentTab,
   renameWorkspace,
 } from "./cmux.ts";
@@ -388,7 +388,38 @@ function updateWidget() {
 export const __test__ = {
   borderLine,
   renderSubagentWidgetLines,
+  buildCompletionCommand,
 };
+
+function buildCompletionCommand(
+  command: string,
+  sessionFile: string,
+  cleanupCommand?: string,
+  shellFamily: "fish" | "posix" = isFishShell() ? "fish" : "posix",
+): string {
+  const exitFile = shellEscape(`${sessionFile}.exit`);
+  if (shellFamily === "fish") {
+    return [
+      command,
+      "set -l pi_subagent_status $status",
+      cleanupCommand,
+      `if not test -f ${exitFile}; printf '{"type":"done","exitCode":%s}\\n' "$pi_subagent_status" > ${exitFile}; end`,
+      `echo '__SUBAGENT_DONE_'$pi_subagent_status'__'`,
+    ]
+      .filter(Boolean)
+      .join("; ");
+  }
+
+  return [
+    command,
+    "pi_subagent_status=$?",
+    cleanupCommand,
+    `if [ ! -f ${exitFile} ]; then printf '{"type":"done","exitCode":%s}\\n' "$pi_subagent_status" > ${exitFile}; fi`,
+    `echo '__SUBAGENT_DONE_'$pi_subagent_status'__'`,
+  ]
+    .filter(Boolean)
+    .join("; ");
+}
 
 function startWidgetRefresh() {
   if (widgetInterval) return;
@@ -624,7 +655,7 @@ async function launchSubagent(
   const cdPrefix = effectiveCwd ? `cd ${shellEscape(effectiveCwd)} && ` : "";
 
   const piCommand = cdPrefix + envPrefix + parts.join(" ");
-  const command = `${piCommand}; echo '__SUBAGENT_DONE_'${exitStatusVar()}'__'`;
+  const command = buildCompletionCommand(piCommand, subagentSessionFile);
   sendCommand(surface, command);
 
   const running: RunningSubagent = {
@@ -1168,7 +1199,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
         }
         const resumeEnvPrefix = resumeEnvParts.length > 0 ? resumeEnvParts.join(" ") + " " : "";
 
-        const command = `${resumeEnvPrefix}${parts.join(" ")}${cleanupMsgFile ? `; rm -f ${shellEscape(cleanupMsgFile)}` : ""}; echo '__SUBAGENT_DONE_'${exitStatusVar()}'__'`;
+        const command = buildCompletionCommand(
+          `${resumeEnvPrefix}${parts.join(" ")}`,
+          params.sessionPath,
+          cleanupMsgFile ? `rm -f ${shellEscape(cleanupMsgFile)}` : undefined,
+        );
         sendCommand(surface, command);
 
         // Register as a running subagent for widget tracking

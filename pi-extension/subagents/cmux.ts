@@ -6,7 +6,7 @@ import { basename, join } from "node:path";
 
 const execFileAsync = promisify(execFile);
 
-export type MuxBackend = "cmux" | "tmux" | "zellij" | "wezterm";
+export type MuxBackend = "cmux" | "tmux" | "zellij" | "wezterm" | "ghostty";
 
 const commandAvailability = new Map<string, boolean>();
 
@@ -29,7 +29,8 @@ function hasCommand(command: string): boolean {
 
 function muxPreference(): MuxBackend | null {
   const pref = (process.env.PI_SUBAGENT_MUX ?? "").trim().toLowerCase();
-  if (pref === "cmux" || pref === "tmux" || pref === "zellij" || pref === "wezterm") return pref;
+  if (pref === "cmux" || pref === "tmux" || pref === "zellij" || pref === "wezterm" || pref === "ghostty")
+    return pref;
   return null;
 }
 
@@ -49,6 +50,18 @@ function isWezTermRuntimeAvailable(): boolean {
   return !!process.env.WEZTERM_UNIX_SOCKET && hasCommand("wezterm");
 }
 
+function isGhosttyRuntimeAvailable(): boolean {
+  if (process.platform !== "darwin" || !hasCommand("osascript")) {
+    return false;
+  }
+
+  if ((process.env.TERM_PROGRAM ?? "").trim().toLowerCase() === "ghostty") {
+    return true;
+  }
+
+  return muxPreference() === "ghostty";
+}
+
 export function isCmuxAvailable(): boolean {
   return isCmuxRuntimeAvailable();
 }
@@ -65,17 +78,23 @@ export function isWezTermAvailable(): boolean {
   return isWezTermRuntimeAvailable();
 }
 
+export function isGhosttyAvailable(): boolean {
+  return isGhosttyRuntimeAvailable();
+}
+
 export function getMuxBackend(): MuxBackend | null {
   const pref = muxPreference();
   if (pref === "cmux") return isCmuxRuntimeAvailable() ? "cmux" : null;
   if (pref === "tmux") return isTmuxRuntimeAvailable() ? "tmux" : null;
   if (pref === "zellij") return isZellijRuntimeAvailable() ? "zellij" : null;
   if (pref === "wezterm") return isWezTermRuntimeAvailable() ? "wezterm" : null;
+  if (pref === "ghostty") return isGhosttyRuntimeAvailable() ? "ghostty" : null;
 
   if (isCmuxRuntimeAvailable()) return "cmux";
   if (isTmuxRuntimeAvailable()) return "tmux";
   if (isZellijRuntimeAvailable()) return "zellij";
   if (isWezTermRuntimeAvailable()) return "wezterm";
+  if (isGhosttyRuntimeAvailable()) return "ghostty";
   return null;
 }
 
@@ -97,7 +116,17 @@ export function muxSetupHint(): string {
   if (pref === "wezterm") {
     return "Start pi inside WezTerm.";
   }
-  return "Start pi inside cmux (`cmux pi`), tmux (`tmux new -A -s pi 'pi'`), zellij (`zellij --session pi`, then run `pi`), or WezTerm.";
+  if (pref === "ghostty") {
+    return "Enable Ghostty AppleScript (`macos-applescript = true`) and run pi inside Ghostty or set `PI_SUBAGENT_MUX=ghostty`.";
+  }
+  return "Start pi inside cmux (`cmux pi`), tmux (`tmux new -A -s pi 'pi'`), zellij (`zellij --session pi`, then run `pi`), WezTerm, or Ghostty with AppleScript enabled (`macos-applescript = true`).";
+}
+
+function ghosttyAppleScript(script: string, args: string[] = []): string {
+  return execFileSync("osascript", ["-", ...args], {
+    encoding: "utf8",
+    input: script,
+  }).trim();
 }
 
 function requireMuxBackend(): MuxBackend {
@@ -187,6 +216,22 @@ let cmuxSubagentPane: string | null = null;
  */
 export function createSurface(name: string): string {
   const backend = getMuxBackend();
+
+  if (backend === "ghostty") {
+    const terminalId = ghosttyAppleScript(`
+on run argv
+  tell application "Ghostty"
+    activate
+    set createdTab to new tab
+    return id of focused terminal of createdTab
+  end tell
+end run
+`);
+    if (!terminalId) {
+      throw new Error("Ghostty AppleScript did not return a terminal id");
+    }
+    return terminalId;
+  }
 
   if (backend === "cmux" && cmuxSubagentPane) {
     // Verify the pane still exists before adding a tab to it
@@ -316,6 +361,40 @@ export function createSurfaceSplit(
     return paneId;
   }
 
+  if (backend === "ghostty") {
+    const targetSurface = fromSurface || ghosttyAppleScript(`
+tell application "Ghostty"
+  return id of focused terminal of selected tab of front window
+end tell
+`);
+    const terminalId = ghosttyAppleScript(
+      `
+on splitDirection(directionName)
+  if directionName is "left" then return left
+  if directionName is "right" then return right
+  if directionName is "up" then return up
+  if directionName is "down" then return down
+  error "Unknown split direction: " & directionName
+end splitDirection
+
+on run argv
+  set targetId to item 1 of argv
+  set splitName to item 2 of argv
+  set splitDirectionName to item 3 of argv
+  tell application "Ghostty"
+    set createdTerminal to split (terminal id targetId) direction (splitDirection(splitDirectionName))
+    return id of createdTerminal
+  end tell
+end run
+`,
+      [targetSurface, name, direction],
+    );
+    if (!terminalId) {
+      throw new Error("Ghostty AppleScript did not return a terminal id");
+    }
+    return terminalId;
+  }
+
   // zellij
   const directionArg = direction === "left" || direction === "right" ? "right" : "down";
   const tokenPath = join(
@@ -405,6 +484,10 @@ export function renameCurrentTab(title: string): void {
     return;
   }
 
+  if (backend === "ghostty") {
+    return;
+  }
+
   zellijActionSync(["rename-tab", title]);
 }
 
@@ -452,6 +535,10 @@ export function renameWorkspace(title: string): void {
     return;
   }
 
+  if (backend === "ghostty") {
+    return;
+  }
+
   // Skip session rename for zellij. rename-session renames the socket file
   // but the ZELLIJ_SESSION_NAME env var in the parent process keeps the old
   // name, so all subsequent `zellij action ...` CLI calls fail with
@@ -484,6 +571,22 @@ export function sendCommand(surface: string, command: string): void {
     execFileSync("wezterm", ["cli", "send-text", "--pane-id", surface, "--no-paste", command + "\n"], {
       encoding: "utf8",
     });
+    return;
+  }
+
+  if (backend === "ghostty") {
+    ghosttyAppleScript(
+      `
+on run argv
+  set targetId to item 1 of argv
+  set inputText to item 2 of argv
+  tell application "Ghostty"
+    input text inputText to terminal id targetId
+  end tell
+end run
+`,
+      [surface, command + "\n"],
+    );
     return;
   }
 
@@ -520,6 +623,10 @@ export function readScreen(surface: string, lines = 50): string {
       { encoding: "utf8" },
     );
     return tailLines(raw, lines);
+  }
+
+  if (backend === "ghostty") {
+    return "";
   }
 
   // Zellij 0.44+: use --pane-id flag + stdout instead of env var + temp file.
@@ -567,6 +674,10 @@ export async function readScreenAsync(surface: string, lines = 50): Promise<stri
     return tailLines(stdout, lines);
   }
 
+  if (backend === "ghostty") {
+    return "";
+  }
+
   // Zellij 0.44+: use --pane-id flag + stdout instead of env var + temp file.
   const paneId = zellijPaneId(surface);
   const { stdout } = await execFileAsync(
@@ -599,6 +710,21 @@ export function closeSurface(surface: string): void {
     execFileSync("wezterm", ["cli", "kill-pane", "--pane-id", surface], {
       encoding: "utf8",
     });
+    return;
+  }
+
+  if (backend === "ghostty") {
+    ghosttyAppleScript(
+      `
+on run argv
+  set targetId to item 1 of argv
+  tell application "Ghostty"
+    close terminal id targetId
+  end tell
+end run
+`,
+      [surface],
+    );
     return;
   }
 

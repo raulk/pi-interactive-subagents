@@ -29,12 +29,13 @@ subagent({ name: "Scout: DB", agent: "scout", task: "Map database schema" });
 pi install git:github.com/HazAT/pi-interactive-subagents
 ```
 
-Supported multiplexers:
+Supported orchestration backends:
 
 - [cmux](https://github.com/manaflow-ai/cmux)
 - [tmux](https://github.com/tmux/tmux)
 - [zellij](https://zellij.dev)
 - [WezTerm](https://wezfurlong.org/wezterm/) (terminal emulator with built-in multiplexing)
+- [Ghostty](https://ghostty.org/) on macOS via AppleScript (`macos-applescript = true`)
 
 Start pi inside one of them:
 
@@ -46,9 +47,11 @@ tmux new -A -s pi 'pi'
 zellij --session pi   # then run: pi
 # or
 # just run pi inside WezTerm — no wrapper needed
+# or
+# run pi inside Ghostty after enabling `macos-applescript = true`
 ```
 
-Optional: set `PI_SUBAGENT_MUX=cmux|tmux|zellij|wezterm` to force a specific backend.
+Optional: set `PI_SUBAGENT_MUX=cmux|tmux|zellij|wezterm|ghostty` to force a specific backend.
 
 ## What's Included
 
