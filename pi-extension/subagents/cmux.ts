@@ -123,10 +123,17 @@ export function muxSetupHint(): string {
 }
 
 function ghosttyAppleScript(script: string, args: string[] = []): string {
-  return execFileSync("osascript", ["-", ...args], {
-    encoding: "utf8",
-    input: script,
-  }).trim();
+  try {
+    return execFileSync("osascript", ["-", ...args], {
+      encoding: "utf8",
+      input: script,
+    }).trim();
+  } catch (error: any) {
+    const detail = error?.stderr?.toString?.().trim() || error?.message || "Unknown AppleScript error";
+    throw new Error(
+      `Ghostty AppleScript failed. Ensure Ghostty is running and \`macos-applescript = true\` is enabled. ${detail}`,
+    );
+  }
 }
 
 function requireMuxBackend(): MuxBackend {
@@ -362,11 +369,21 @@ export function createSurfaceSplit(
   }
 
   if (backend === "ghostty") {
-    const targetSurface = fromSurface || ghosttyAppleScript(`
+    const targetSurface =
+      fromSurface ||
+      (() => {
+        try {
+          return ghosttyAppleScript(`
 tell application "Ghostty"
   return id of focused terminal of selected tab of front window
 end tell
 `);
+        } catch (error: any) {
+          throw new Error(
+            `Ghostty needs an active window and focused terminal before creating a split. ${error?.message ?? String(error)}`,
+          );
+        }
+      })();
     const terminalId = ghosttyAppleScript(
       `
 on splitDirection(directionName)
@@ -626,6 +643,9 @@ export function readScreen(surface: string, lines = 50): string {
   }
 
   if (backend === "ghostty") {
+    // Ghostty's AppleScript API currently exposes input and surface lifecycle
+    // operations, but not terminal screen capture. Completion falls back to the
+    // `.exit` sidecar file written by the subagent shell wrapper.
     return "";
   }
 
@@ -675,6 +695,9 @@ export async function readScreenAsync(surface: string, lines = 50): Promise<stri
   }
 
   if (backend === "ghostty") {
+    // Ghostty's AppleScript API currently exposes input and surface lifecycle
+    // operations, but not terminal screen capture. Completion falls back to the
+    // `.exit` sidecar file written by the subagent shell wrapper.
     return "";
   }
 
