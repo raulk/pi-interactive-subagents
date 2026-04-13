@@ -131,7 +131,7 @@ function ghosttyAppleScript(script: string, args: string[] = []): string {
   } catch (error: any) {
     const detail = error?.stderr?.toString?.().trim() || error?.message || "Unknown AppleScript error";
     throw new Error(
-      `Ghostty AppleScript failed. Ensure Ghostty is running and \`macos-applescript = true\` is enabled. ${detail}`,
+      `Ghostty AppleScript failed. Ensure Ghostty is running and \`macos-applescript = true\` is set in Ghostty's config. ${detail}`,
     );
   }
 }
