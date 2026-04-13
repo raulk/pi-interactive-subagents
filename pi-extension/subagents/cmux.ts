@@ -226,13 +226,11 @@ export function createSurface(name: string): string {
 
   if (backend === "ghostty") {
     const terminalId = ghosttyAppleScript(`
-on run argv
-  tell application "Ghostty"
-    activate
-    set createdTab to new tab
-    return id of focused terminal of createdTab
-  end tell
-end run
+tell application "Ghostty"
+  activate
+  set createdTab to new tab
+  return id of focused terminal of createdTab
+end tell
 `);
     if (!terminalId) {
       throw new Error("Ghostty AppleScript did not return a terminal id");
@@ -387,6 +385,8 @@ end tell
     const terminalId = ghosttyAppleScript(
       `
 on splitDirection(directionName)
+  -- These identifiers map directly to Ghostty's AppleScript split-direction
+  -- enumeration values from Ghostty.sdef.
   if directionName is "left" then return left
   if directionName is "right" then return right
   if directionName is "up" then return up
@@ -396,15 +396,14 @@ end splitDirection
 
 on run argv
   set targetId to item 1 of argv
-  set splitName to item 2 of argv
-  set splitDirectionName to item 3 of argv
+  set splitDirectionName to item 2 of argv
   tell application "Ghostty"
     set createdTerminal to split (terminal id targetId) direction (splitDirection(splitDirectionName))
     return id of createdTerminal
   end tell
 end run
 `,
-      [targetSurface, name, direction],
+      [targetSurface, direction],
     );
     if (!terminalId) {
       throw new Error("Ghostty AppleScript did not return a terminal id");
